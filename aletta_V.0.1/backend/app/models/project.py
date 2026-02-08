@@ -24,4 +24,4 @@ class Dataset(Base):
     columns = Column(JSON) # Stores list of column names: ["date", "sales", ...]
     project_id = Column(Integer, ForeignKey("projects.id"))
 
-    project = relationship("project", back_populates="datasets")
+    project = relationship("Project", back_populates="datasets")
