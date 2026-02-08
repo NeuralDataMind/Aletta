@@ -5,7 +5,6 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from app.core.database import engine, Base, get_db
 from app.models import project as models
-from app.schemas import project as schemas
 from app.core.ai import get_groq_analysis
 from app.core.security import SECRET_KEY, ALGORITHM
 from app.models.project import User
