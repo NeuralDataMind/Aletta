@@ -8,6 +8,7 @@ import shutil
 import os
 import pandas as pd
 import json
+import numpy as np
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -103,3 +104,36 @@ async def upload_dataset(
         "status": "Uploaded"
     }
 
+@app.get("/projects/{project_id}/eda/")
+async def get_project_eda(
+    project_id: int,
+    db: Session = Depends(get_db)
+):
+    # Dataset path
+    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    # Load Data
+    try:
+        df = pd.read_csv(dataset.file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read file: {str(e)}")
+    
+    # Calculate "Power BI" Style Status
+    summary = {
+        "total_rows": len(df),
+        "columns": list(df.columns),
+        "missing_values": df.isnull().sum().to_dict(),
+        "data_types": df.dtypes.astype(str).to_dict(),
+        "numeric_summary": df.describe().replace({np.nan: None}).to_dict()
+    }
+
+    # Get a sample for the "Data Grid" view
+    # Replace NaN with None so JSON doesn't break
+    sample_data = df.head(5).replace({np.nan: None}).to_dict(orient="records")
+
+    return {
+        "summary": summary,
+        "sample": sample_data
+    }
