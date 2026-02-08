@@ -14,4 +14,14 @@ class Project(Base):
     # Relationship to datasets
     datasets = relationship("Dataset", back_populates="project")
 
+class Dataset(Base):
+    __tablename__ = "datasets"
 
+    id = Column(Integer, primary_key=True, index=True)
+    filename = Column(String)
+    file_path = Column(String) # where the file will be saved (CSV)
+    row_count = Column(Integer)
+    columns = Column(JSON) # Stores list of column names: ["date", "sales", ...]
+    project_id = Column(Integer, ForeignKey("projects.id"))
+
+    project = relationship("project", back_populates="datasets")
