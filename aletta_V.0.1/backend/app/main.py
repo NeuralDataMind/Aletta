@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import engine, Base, get_db
 from app.models import project as models
 from app.schemas import project as schemas
+from app.core.ai import get_groq_analysis
 import shutil
 import os
 import pandas as pd
@@ -137,3 +138,50 @@ async def get_project_eda(
         "summary": summary,
         "sample": sample_data
     }
+
+@app.post("/projects/{project_id}/analyze")
+async def analyze_project(
+    project_id: int,
+    db: Session = Depends(get_db)
+):
+    # Reuse EDA Logic (Get the numbers)
+    # After refactor this into a service function to avoid duplication code
+    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    df = pd.read_csv(dataset.file_path)
+
+    # Prepare the Context for the AI
+    # Sends the "Numeric Summary" and the "First 5 rows" so it understands the context
+    summary_stats = df.describe().to_string()
+    headers = list(df.columns)
+    sample_rows = df.head(5).to_string()
+
+    data_context = f"""
+    Dataset Columns: {headers}
+    
+    Statistical Summary:
+    {summary_stats}
+    
+    First 5 Rows of Data:
+    {sample_rows}
+    """
+    system_prompt = """
+    You are Aletta, a Senior Data Scientist and CFO Agent. 
+    Analyze the provided dataset summary. 
+    
+    Your Output must be in Markdown format:
+    1. **Executive Summary**: 2 sentences on the overall health of the data.
+    2. **Key Insights**: 3 bullet points finding patterns in Sales, Profit, or Status.
+    3. **Anomalies**: Did you see any weird Min/Max values? (e.g. Negative profit?)
+    4. **Recommendation**: One clear business action.
+    """
+
+    # Call Groq
+    try:
+        ai_response = get_groq_analysis(system_prompt, data_context)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
+    
+    return {"analysis": ai_response}
