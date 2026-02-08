@@ -8,6 +8,7 @@ from app.models import project as models
 from app.core.ai import get_groq_analysis
 from app.core.security import SECRET_KEY, ALGORITHM
 from app.models.project import User
+from app.api import auth
 from app import schemas
 import shutil
 import os
@@ -19,6 +20,7 @@ models.Base.metadata.create_all(bind=engine)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 app = FastAPI(title="Aletta AI Engine", version="0.1.0")
+app.include_router(auth.router)
 
 # Enable CORS for React (Vite default port is 5173)
 app.add_middleware(

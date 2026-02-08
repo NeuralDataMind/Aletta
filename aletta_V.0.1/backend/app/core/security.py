@@ -2,11 +2,15 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 # Configuration
-SECRET_KEY = "SUPER_SECRET_ALETTA_KEY_CHANGE_THIS" # Move to .env later
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1 Day
+SECRET_KEY = os.getenv("SECRET_KEY", "fallback_for_local_dev_only")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440)) # 1 Day
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
