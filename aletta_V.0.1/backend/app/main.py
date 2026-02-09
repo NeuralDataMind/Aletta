@@ -31,6 +31,28 @@ app.add_middleware(
     allow_headers = ["*"],
 )
 
+def get_current_user(
+    token: str = Depends(oauth2_scheme), 
+    db: Session = Depends(get_db)
+):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+        
+    user = db.query(User).filter(User.username == username).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
 @app.get("/")
 async def root():
     return {
@@ -149,68 +171,43 @@ async def get_project_eda(
 @app.post("/projects/{project_id}/analyze")
 async def analyze_project(
     project_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user) # Ensure security
 ):
-    # Reuse EDA Logic (Get the numbers)
-    # After refactor this into a service function to avoid duplication code
+    project = db.query(models.Project).filter(
+        models.Project.id == project_id,
+        models.Project.owner_id == current_user.id
+    ).first()
+
     dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
+
     if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+        raise HTTPException(status_code=404, detail="Please upload a CSV first.")
     
     df = pd.read_csv(dataset.file_path)
 
-    # Prepare the Context for the AI
-    # Sends the "Numeric Summary" and the "First 5 rows" so it understands the context
-    summary_stats = df.describe().to_string()
-    headers = list(df.columns)
-    sample_rows = df.head(5).to_string()
+    # --- Dynamic Prompt Selection ---
+    prompts = {
+        "CRM": "Analyze customer retention and churn. Focus on Lifetime Value (LTV).",
+        "Accounting": "Analyze the ledger. Focus on EBITDA and cash flow trends.",
+        "Manufacturing": "Analyze production efficiency. Focus on defect rates and lead times.",
+        "Subscription": "Analyze MRR and ARR growth. Focus on expansion vs. contraction."
+    }
 
-    data_context = f"""
-    Dataset Columns: {headers}
+    module_instruction = prompts.get(project.module, "Analyze the overall health of the dataset.")
+
+    system_prompt = f"""
+    You are Aletta, a specialized AI Agent for {project.category} ({project.module}).
+    {module_instruction}
     
-    Statistical Summary:
-    {summary_stats}
-    
-    First 5 Rows of Data:
-    {sample_rows}
-    """
-    system_prompt = """
-    You are Aletta, a Senior Data Scientist and CFO Agent. 
-    Analyze the provided dataset summary. 
-    
-    Your Output must be in Markdown format:
-    1. **Executive Summary**: 2 sentences on the overall health of the data.
-    2. **Key Insights**: 3 bullet points finding patterns in Sales, Profit, or Status.
-    3. **Anomalies**: Did you see any weird Min/Max values? (e.g. Negative profit?)
-    4. **Recommendation**: One clear business action.
+    Output in Markdown:
+    1. **Executive Summary**
+    2. **Key Metrics** (Calculated from data)
+    3. **Anomalies**
+    4. **CFO Recommendation**
     """
 
-    # Call Groq
-    try:
-        ai_response = get_groq_analysis(system_prompt, data_context)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
-    
+    data_context = df.describe().to_string() + "\n\nSample:\n" + df.head(5).to_string()
+
+    ai_response = get_groq_analysis(system_prompt, data_context)
     return {"analysis": ai_response}
-
-def get_current_user(
-    token: str = Depends(oauth2_scheme), 
-    db: Session = Depends(get_db)
-):
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-        
-    user = db.query(User).filter(User.username == username).first()
-    if user is None:
-        raise credentials_exception
-    return user

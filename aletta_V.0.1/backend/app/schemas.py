@@ -26,7 +26,8 @@ class TokenData(BaseModel):
 # --- Project Schemas ---
 class ProjectBase(BaseModel):
     name: str
-    type: str # e.g., "Finance"
+    category: str # e.g., "Sales"
+    module: str # e.g., "CRM"
 
 class ProjectCreate(ProjectBase):
     pass

@@ -17,8 +17,9 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    type = Column(String)   # "Finance", "Engineering", "Analysis"
+    name = Column(String, index=True) # Cluster: "Sales", "Finance", or "Inventory"
+    category = Column(String, index=True) # App: "CRM", "Accounting", "PLM", etc.
+    module = Column(String, index=True)   
     owner_id = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default = datetime.utcnow)
 

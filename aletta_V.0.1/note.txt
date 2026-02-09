@@ -1,4 +1,19 @@
-{
-    "name": "Q1 Sales Analysis", 
-    "type": "Finance"
-}
+|- aletta_V.0.1
+| |-backend
+| | |-app
+| | | |-api
+| | |   |-auth.py
+| | |-core
+| | | |-ai.py
+| | | |-database.py
+| | | |-security.py
+| | |-models
+| | | |-project.py
+| | |-main.py
+| | |-schemas.py
+| | |-data
+| | | |-aletta_dummy_data.csv
+| | | |-aletta.db
+| | |-.env
+| | |-requirements.txt
+| |-frontend
