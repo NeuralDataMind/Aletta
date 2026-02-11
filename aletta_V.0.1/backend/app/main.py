@@ -174,6 +174,27 @@ async def analyze_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user) # Ensure security
 ):
+    current_project = db.query(models.Project).filter(models.Project.id == project_id).first()
+
+    user_memory = db.query(models.Dataset).join(models.Project).filter(
+        models.Project.owner_id == current_user.id
+    ).all()
+
+    memory_context = ""
+    for data in user_memory:
+        memory_context += f"\n- App: {data.project.module} | File: {data.filename} | Cols: {data.columns}"
+
+    system_prompt = f"""
+    You are Aletta, an Intelligent ERP Agent.
+    CURRENT MODULE: {current_project.module}
+    
+    CROSS-APP MEMORY:
+    You have access to the following other modules for this user:
+    {memory_context}
+    
+    When analyzing, connect dots between departments (e.g., link Sales to Inventory).
+    """
+
     project = db.query(models.Project).filter(
         models.Project.id == project_id,
         models.Project.owner_id == current_user.id
