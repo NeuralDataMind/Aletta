@@ -7,6 +7,7 @@ from app.core.database import engine, Base, get_db
 from app.models import project as models
 from app.core.ai import get_groq_analysis
 from app.core.security import SECRET_KEY, ALGORITHM
+from app.services import sales_tools, finance_tools, inventory_tools
 from app.models.project import User
 from app.api import auth
 from app import schemas
@@ -172,63 +173,49 @@ async def get_project_eda(
 async def analyze_project(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user) # Ensure security
+    current_user: User = Depends(get_current_user)
 ):
-    current_project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    # 1. Verification & Security
+    project = db.query(models.Project).filter(
+        models.Project.id == project_id, 
+        models.Project.owner_id == current_user.id
+    ).first()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
 
+    # 2. FETCH CROSS-APP MEMORY (The Agent's Knowledge)
     user_memory = db.query(models.Dataset).join(models.Project).filter(
         models.Project.owner_id == current_user.id
     ).all()
+    memory_context = "\n".join([f"- {d.project.module}: {d.filename}" for d in user_memory])
 
-    memory_context = ""
-    for data in user_memory:
-        memory_context += f"\n- App: {data.project.module} | File: {data.filename} | Cols: {data.columns}"
-
-    system_prompt = f"""
-    You are Aletta, an Intelligent ERP Agent.
-    CURRENT MODULE: {current_project.module}
+    # 3. RUN THE CALCULATOR (Ground Truth)
+    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
+    df = pd.read_csv(dataset.file_path)
     
-    CROSS-APP MEMORY:
-    You have access to the following other modules for this user:
+    math_truth = {}
+    if project.category == "Sales":
+        if project.module == "CRM":
+            math_truth = sales_tools.calculate_crm_metrics(df)
+        elif project.module == "Subscription":
+            math_truth = sales_tools.calculate_subscription_metrics(df)
+
+    # 4. FEED EVERYTHING TO THE BRAIN
+    system_prompt = f"""
+    You are Aletta, a Senior CFO Agent. 
+    CURRENT MODULE: {project.module}
+    CALCULATED DATA (GROUND TRUTH): {math_truth}
+    
+    CROSS-APP KNOWLEDGE:
     {memory_context}
     
-    When analyzing, connect dots between departments (e.g., link Sales to Inventory).
+    TASK: Use the Ground Truth for your math. Use Cross-App Knowledge to find correlations.
     """
 
-    project = db.query(models.Project).filter(
-        models.Project.id == project_id,
-        models.Project.owner_id == current_user.id
-    ).first()
-
-    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
-
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Please upload a CSV first.")
+    ai_analysis = get_groq_analysis(system_prompt, "Provide a strategic analysis.")
     
-    df = pd.read_csv(dataset.file_path)
-
-    # --- Dynamic Prompt Selection ---
-    prompts = {
-        "CRM": "Analyze customer retention and churn. Focus on Lifetime Value (LTV).",
-        "Accounting": "Analyze the ledger. Focus on EBITDA and cash flow trends.",
-        "Manufacturing": "Analyze production efficiency. Focus on defect rates and lead times.",
-        "Subscription": "Analyze MRR and ARR growth. Focus on expansion vs. contraction."
+    return {
+        "metrics": math_truth,
+        "analysis": ai_analysis
     }
-
-    module_instruction = prompts.get(project.module, "Analyze the overall health of the dataset.")
-
-    system_prompt = f"""
-    You are Aletta, a specialized AI Agent for {project.category} ({project.module}).
-    {module_instruction}
-    
-    Output in Markdown:
-    1. **Executive Summary**
-    2. **Key Metrics** (Calculated from data)
-    3. **Anomalies**
-    4. **CFO Recommendation**
-    """
-
-    data_context = df.describe().to_string() + "\n\nSample:\n" + df.head(5).to_string()
-
-    ai_response = get_groq_analysis(system_prompt, data_context)
-    return {"analysis": ai_response}
