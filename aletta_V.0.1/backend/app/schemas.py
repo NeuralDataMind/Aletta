@@ -23,18 +23,19 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: Optional[str] = None
 
-# --- Project Schemas ---
+# --- Project Schemas (UPDATED) ---
 class ProjectBase(BaseModel):
     name: str
-    category: str # e.g., "Sales"
-    module: str # e.g., "CRM"
+    problem_statement: str
+    dataset_context: str
+    target_variable: Optional[str] = None
 
 class ProjectCreate(ProjectBase):
     pass
 
 class ProjectResponse(ProjectBase):
     id: int
-    owner_id: int # Vital for ownership logic
+    owner_id: int
     created_at: datetime
     class Config:
         from_attributes = True

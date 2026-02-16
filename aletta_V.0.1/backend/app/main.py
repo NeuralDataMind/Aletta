@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, File, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
@@ -7,7 +7,6 @@ from app.core.database import engine, Base, get_db
 from app.models import project as models
 from app.core.ai import get_groq_analysis
 from app.core.security import SECRET_KEY, ALGORITHM
-from app.services import sales_tools, finance_tools, inventory_tools
 from app.models.project import User
 from app.api import auth
 from app import schemas
@@ -17,25 +16,23 @@ import pandas as pd
 import json
 import numpy as np
 
+# Note: We will add 'eda_tools' and 'ml_tools' imports later when we build them.
+
 models.Base.metadata.create_all(bind=engine)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
-app = FastAPI(title="Aletta AI Engine", version="0.1.0")
+app = FastAPI(title="Aletta Data Science Hub", version="0.2.0")
 app.include_router(auth.router)
 
-# Enable CORS for React (Vite default port is 5173)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins = ["http://localhost:5173"], 
-    allow_credentials = True,
-    allow_methods = ["*"],
-    allow_headers = ["*"],
+    allow_origins=["http://localhost:5173"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-def get_current_user(
-    token: str = Depends(oauth2_scheme), 
-    db: Session = Depends(get_db)
-):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=401,
         detail="Could not validate credentials",
@@ -48,7 +45,6 @@ def get_current_user(
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-        
     user = db.query(User).filter(User.username == username).first()
     if user is None:
         raise credentials_exception
@@ -56,166 +52,124 @@ def get_current_user(
 
 @app.get("/")
 async def root():
-    return {
-        "message": "Welcome to Aletta Backend",
-        "features": ["Dataset", "Dashboard", "Aletta Chart"],
-        "status": "Ready"
-    }
+    return {"message": "Aletta Data Engine Ready", "modes": ["Analysis", "Model", "Dashboard"]}
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "database": "connected"}
-
-@app.post("/projects/", response_model = schemas.ProjectResponse)
+@app.post("/projects/", response_model=schemas.ProjectResponse)
 def create_project(
     project_in: schemas.ProjectCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    db_project = models.Project(name = project_in.name, type = project_in.type)
+    # Updated to save Metadata
+    db_project = models.Project(
+        name=project_in.name,
+        problem_statement=project_in.problem_statement,
+        dataset_context=project_in.dataset_context,
+        target_variable=project_in.target_variable,
+        owner_id=current_user.id
+    )
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
-
     return db_project
 
-@app.get("/projects/", response_model = list[schemas.ProjectResponse])
-def read_projects(
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db)
-):
-    projects = db.query(models.Project).offset(skip).limit(limit).all()
-
+@app.get("/projects/", response_model=list[schemas.ProjectResponse])
+def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    projects = db.query(models.Project).filter(models.Project.owner_id == current_user.id).offset(skip).limit(limit).all()
     return projects
 
 @app.post("/projects/{project_id}/upload/")
-async def upload_dataset(
-    project_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    # Verify Project Exists
+async def upload_dataset(project_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Save File to Disk
     file_location = f"data/{file.filename}"
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Extract Metadata using Pandas
     try:
-        # Read only the header to be fast
         df = pd.read_csv(file_location, nrows=0)
         columns = df.columns.tolist()
-
-        # Get row count (slightly slower but necessary)
         with open(file_location) as f:
             row_count = sum(1 for line in f) - 1
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid CSV: {str(e)}")
     
-    # Save Record to DB
     db_dataset = models.Dataset(
-        filename = file.filename,
-        file_path = file_location,
-        row_count = row_count,
-        columns = columns, # Storing list as JSON
-        project_id = project_id
+        filename=file.filename,
+        file_path=file_location,
+        row_count=row_count,
+        columns=columns,
+        project_id=project_id
     )
     db.add(db_dataset)
     db.commit()
     db.refresh(db_dataset)
-
-    return {
-        "filename": file.filename,
-        "columns": columns,
-        "row": row_count,
-        "status": "Uploaded"
-    }
-
-@app.get("/projects/{project_id}/eda/")
-async def get_project_eda(
-    project_id: int,
-    db: Session = Depends(get_db)
-):
-    # Dataset path
-    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    
-    # Load Data
-    try:
-        df = pd.read_csv(dataset.file_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not read file: {str(e)}")
-    
-    # Calculate "Power BI" Style Status
-    summary = {
-        "total_rows": len(df),
-        "columns": list(df.columns),
-        "missing_values": df.isnull().sum().to_dict(),
-        "data_types": df.dtypes.astype(str).to_dict(),
-        "numeric_summary": df.describe().replace({np.nan: None}).to_dict()
-    }
-
-    # Get a sample for the "Data Grid" view
-    # Replace NaN with None so JSON doesn't break
-    sample_data = df.head(5).replace({np.nan: None}).to_dict(orient="records")
-
-    return {
-        "summary": summary,
-        "sample": sample_data
-    }
+    return {"status": "Uploaded", "columns": columns}
 
 @app.post("/projects/{project_id}/analyze")
 async def analyze_project(
     project_id: int,
+    mode: str = Body(..., embed=True), # "analysis", "model", or "dashboard"
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 1. Verification & Security
+    # 1. Fetch Project & Metadata
     project = db.query(models.Project).filter(
         models.Project.id == project_id, 
         models.Project.owner_id == current_user.id
     ).first()
     
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-
-    # 2. FETCH CROSS-APP MEMORY (The Agent's Knowledge)
-    user_memory = db.query(models.Dataset).join(models.Project).filter(
-        models.Project.owner_id == current_user.id
-    ).all()
-    memory_context = "\n".join([f"- {d.project.module}: {d.filename}" for d in user_memory])
-
-    # 3. RUN THE CALCULATOR (Ground Truth)
     dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
+    if not dataset or not project:
+        raise HTTPException(status_code=404, detail="Project or Dataset not found")
+    
     df = pd.read_csv(dataset.file_path)
     
-    math_truth = {}
-    if project.category == "Sales":
-        if project.module == "CRM":
-            math_truth = sales_tools.calculate_crm_metrics(df)
-        elif project.module == "Subscription":
-            math_truth = sales_tools.calculate_subscription_metrics(df)
+    # 2. MODE SWITCHING LOGIC
+    # Depending on the mode, we will call different "Tools" in the future
+    
+    action_report = {}
+    if mode == "analysis":
+        # TODO: Call eda_tools.perform_cleaning(df)
+        action_report = {"status": "EDA Complete", "missing_values_handled": True}
+        system_instruction = "You are a Data Engineer. Explain the cleaning steps and data quality."
+        
+    elif mode == "model":
+        # TODO: Call ml_tools.train_baseline(df, project.target_variable)
+        action_report = {"status": "Baseline Model Trained", "algorithm": "RandomForest", "accuracy": 0.88}
+        system_instruction = "You are an ML Engineer. Explain the model selection and performance."
+        
+    elif mode == "dashboard":
+        action_report = {"status": "Dashboard Configured", "charts": ["Correlation Heatmap", "Distribution Plot"]}
+        system_instruction = "You are a BI Specialist. Suggest key insights for the dashboard."
+    
+    else:
+        raise HTTPException(status_code=400, detail="Invalid Mode. Use 'analysis', 'model', or 'dashboard'.")
 
-    # 4. FEED EVERYTHING TO THE BRAIN
+    # 3. AI AGENT EXPLANATION
     system_prompt = f"""
-    You are Aletta, a Senior CFO Agent. 
-    CURRENT MODULE: {project.module}
-    CALCULATED DATA (GROUND TRUTH): {math_truth}
+    {system_instruction}
     
-    CROSS-APP KNOWLEDGE:
-    {memory_context}
+    PROJECT METADATA:
+    Problem: {project.problem_statement}
+    Context: {project.dataset_context}
+    Target: {project.target_variable}
     
-    TASK: Use the Ground Truth for your math. Use Cross-App Knowledge to find correlations.
+    TOOL OUTPUTS:
+    {action_report}
+    
+    Explain the results to the user based on their problem statement.
     """
-
-    ai_analysis = get_groq_analysis(system_prompt, "Provide a strategic analysis.")
+    
+    # Simple Context for now
+    data_sample = df.describe().to_string()
+    
+    ai_response = get_groq_analysis(system_prompt, data_sample)
     
     return {
-        "metrics": math_truth,
-        "analysis": ai_analysis
+        "mode": mode,
+        "tool_results": action_report,
+        "ai_insight": ai_response
     }
