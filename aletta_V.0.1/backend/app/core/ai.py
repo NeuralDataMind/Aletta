@@ -26,3 +26,38 @@ def get_groq_analysis(
         return f"AI Analysis Failed: {str(e)}"
     
     return chat_completion.choices[0].message.content
+
+# app/core/ai.py (Add this new function)
+
+def get_engineering_strategy(column_stats: str):
+    """
+    Asks the AI to decide how to clean specific columns.
+    Returns a JSON-parsable string.
+    """
+    system_prompt = """
+    You are a Senior Data Engineer. 
+    Analyze the column statistics provided.
+    Decide on the best cleaning strategy for each column.
+    
+    OUTPUT FORMAT (Strict JSON):
+    {
+        "Age": {"action": "impute", "method": "median"},
+        "City": {"action": "encode", "method": "label"},
+        "Notes": {"action": "drop", "reason": "too much missing text"}
+    }
+    """
+    
+    # We use a lower temperature for deterministic logic
+    try:
+        completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": column_stats},
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.1, # Precise logic
+            response_format={"type": "json_object"} # Force JSON
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return "{}"
