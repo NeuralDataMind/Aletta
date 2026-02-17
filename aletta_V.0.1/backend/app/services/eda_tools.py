@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import json
+import re  # <--- NEW IMPORT
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
 
@@ -12,7 +13,7 @@ except ImportError:
 
 class AutoDataEngineer:
     def __init__(self, df: pd.DataFrame):
-        self.df = df.copy() # SAFETY: Work on a copy to avoid SettingWithCopy warnings
+        self.df = df.copy() 
         self.log = []
         self.original_shape = df.shape
 
@@ -22,7 +23,7 @@ class AutoDataEngineer:
     def run_pipeline(self):
         self.log_step(f"🚀 Starting Auto-Engineering on {self.original_shape[0]} rows, {self.original_shape[1]} columns.")
         
-        # --- PHASE 1: CLEANING (AI + Heuristic) ---
+        # --- PHASE 1: CLEANING ---
         ai_success = False
         if get_engineering_strategy:
             try:
@@ -31,18 +32,16 @@ class AutoDataEngineer:
             except Exception as e:
                 self.log_step(f"⚠️ AI Strategy failed ({str(e)}). Switching to Heuristic Mode.")
         
-        # Always run heuristic cleanup as a safety net for anything the AI missed
         self._heuristic_cleaning() 
         self._drop_duplicates()
-        self._fix_data_types()
+        self._fix_data_types()  # <--- BUG WAS HERE
         
         # --- PHASE 2: FEATURE ENGINEERING ---
         self._extract_date_features()
         self._extract_text_features()
         self._encode_categoricals()
         
-        # --- PHASE 3: FINAL SWEEP (Critical Fix) ---
-        # Catch NaNs created by Feature Engineering (e.g., Year extracted from NaT Date)
+        # --- PHASE 3: FINAL SWEEP ---
         self._heuristic_cleaning(silent=True)
 
         # --- PHASE 4: PREPROCESSING ---
@@ -79,34 +78,30 @@ class AutoDataEngineer:
                     method = instructions.get("method", "median")
                     if method == "median" and pd.api.types.is_numeric_dtype(self.df[col]):
                         val = self.df[col].median()
-                        self.df[col] = self.df[col].fillna(val) # FIX: Direct assignment
+                        self.df[col] = self.df[col].fillna(val)
                         self.log_step(f"🧩 Imputed '{col}' with Median ({val:.2f})")
                     elif method == "mode":
                         val = self.df[col].mode()[0]
-                        self.df[col] = self.df[col].fillna(val) # FIX: Direct assignment
+                        self.df[col] = self.df[col].fillna(val)
                         self.log_step(f"🧩 Imputed '{col}' with Mode ({val})")
         except:
-            pass # Fail silently, Heuristic will catch it
+            pass 
 
     def _heuristic_cleaning(self, silent=False):
-        """Fallback that guarantees no NaNs remain."""
-        # Numeric: Impute with Median
         num_cols = self.df.select_dtypes(include=[np.number]).columns
         if len(num_cols) > 0:
             imputer = SimpleImputer(strategy='median')
-            # Only fit if there are actually NaNs to avoid unnecessary operations
             if self.df[num_cols].isnull().any().any():
                 self.df[num_cols] = imputer.fit_transform(self.df[num_cols])
                 if not silent:
-                    self.log_step(f"🧩 (Heuristic) Imputed missing values in numeric columns.")
+                    self.log_step(f"🧩 (Heuristic) Imputed numeric columns.")
 
-        # Categorical: Impute with "Unknown"
         cat_cols = self.df.select_dtypes(include=['object', 'category']).columns
         for col in cat_cols:
             if self.df[col].isnull().sum() > 0:
                 self.df[col] = self.df[col].fillna("Unknown")
                 if not silent:
-                    self.log_step(f"🧩 (Heuristic) Filled missing values in '{col}' with 'Unknown'.")
+                    self.log_step(f"🧩 (Heuristic) Filled missing values in '{col}'.")
 
     def _drop_duplicates(self):
         initial = len(self.df)
@@ -116,18 +111,37 @@ class AutoDataEngineer:
             self.log_step(f"🗑️ Dropped {dropped} duplicate rows.")
 
     def _fix_data_types(self):
+        """
+        Detects if a numeric column is actually an ID (e.g. 'Transaction_ID').
+        STRICT FIX: Only matches '_id', 'id_', or exact 'id'. Ignores 'width'.
+        """
         for col in self.df.columns:
-            if ('id' in col.lower() or 'code' in col.lower()) and pd.api.types.is_numeric_dtype(self.df[col]):
-                if self.df[col].nunique() > 10: 
-                    self.df[col] = self.df[col].astype(str)
-                    self.log_step(f"🔢 Converted ID column '{col}' to string.")
+            if not pd.api.types.is_numeric_dtype(self.df[col]):
+                continue
+                
+            col_lower = col.lower()
+            
+            # 1. Check for "ID" pattern
+            is_id_pattern = (
+                col_lower == 'id' or 
+                col_lower.endswith('_id') or 
+                col_lower.startswith('id_') or 
+                'code' in col_lower
+            )
+            
+            # 2. Check for High Cardinality (IDs usually are unique)
+            # But don't convert if it's a float (e.g. 1.5 is likely not an ID)
+            is_integer_like = (self.df[col] % 1 == 0).all()
+            
+            if is_id_pattern and is_integer_like and self.df[col].nunique() > 10:
+                self.df[col] = self.df[col].astype(str)
+                self.log_step(f"🔢 Converted ID column '{col}' to string.")
 
     def _extract_date_features(self):
         for col in self.df.columns:
             if pd.api.types.is_datetime64_any_dtype(self.df[col]) or 'date' in col.lower():
                 try:
                     self.df[col] = pd.to_datetime(self.df[col], errors='coerce')
-                    # Creating new features might introduce NaNs if date was NaT
                     self.df[f'{col}_year'] = self.df[col].dt.year
                     self.df[f'{col}_month'] = self.df[col].dt.month
                     self.df[f'{col}_day'] = self.df[col].dt.day_name()
@@ -150,23 +164,20 @@ class AutoDataEngineer:
             unique_count = self.df[col].nunique()
             if unique_count < 50:
                 new_col = f"{col}_encoded"
-                # Convert to string to handle any mixed types safely before encoding
                 self.df[new_col] = le.fit_transform(self.df[col].astype(str))
                 self.df = self.df.drop(columns=[col])
                 self.log_step(f"🔤 Label Encoded '{col}'.")
 
     def _scale_numerical_features(self):
-        # Final check: Drop any columns that are STILL purely NaN (unfixable)
         self.df = self.df.dropna(axis=1, how='all')
-        
         num_cols = self.df.select_dtypes(include=[np.number]).columns
         if len(num_cols) > 0:
             scaler = StandardScaler()
             try:
                 self.df[num_cols] = scaler.fit_transform(self.df[num_cols])
                 self.log_step(f"⚖️ Scaled {len(num_cols)} numerical features.")
-            except Exception as e:
-                self.log_step(f"⚠️ Scaling failed: {str(e)}. Returned unscaled data.")
+            except:
+                pass
 
 # --- EXPORT FUNCTION ---
 def run_auto_prep(df: pd.DataFrame):

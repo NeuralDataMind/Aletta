@@ -271,7 +271,7 @@ async def analyze_project(
 @app.get("/projects/{project_id}/download/{file_type}")
 async def download_dataset(
     project_id: int,
-    file_type: str,
+    file_type: str, # Options: "raw", "engineered", "model" <--- NEW OPTION
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -280,12 +280,12 @@ async def download_dataset(
         models.Project.id == project_id,
         models.Project.owner_id == current_user.id
     ).first()
-
-    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
-
-    if not project or not dataset:
-        raise HTTPException(status_code=404, detail="Project or File not found.")
     
+    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
+    
+    if not project or not dataset:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
     # 2. DETERMINE FILE PATH
     file_path = dataset.file_path
     filename = dataset.filename
@@ -293,14 +293,18 @@ async def download_dataset(
     if file_type == "engineered":
         file_path = dataset.file_path.replace(".csv", "_engineered.csv")
         filename = dataset.filename.replace(".csv", "_engineered.csv")
-
-        # Check if the AI has actually run yet
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=400, detail="Engineered data not found. Please run Analysis mode first")
+    
+    elif file_type == "model":  # <--- NEW LOGIC
+        # The ML Tool saves models as "data/models/project_{id}.pkl"
+        file_path = f"data/models/project_{project_id}.pkl"
+        filename = f"model_project_{project_id}.pkl"
         
+        if not os.path.exists(file_path):
+             raise HTTPException(status_code=400, detail="Model not found. Please run 'Model' mode first.")
+
     # 3. SERVE FILE
     return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type='text/csv'
+        path=file_path, 
+        filename=filename, 
+        media_type='application/octet-stream' # Standard for binary files like .pkl
     )
