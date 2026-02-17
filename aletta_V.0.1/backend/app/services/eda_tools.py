@@ -27,7 +27,7 @@ class AutoDataEngineer:
         Master function that runs the entire Data Engineering sequence.
         Flow: AI Cleaning Strategy -> Feature Engineering -> Scaling
         """
-        self.log_step(f"🚀 Starting Auto-Engineering on {self.original_shape[0]} rows, {self.original_shape[1]} columns.")
+        self.log_step(f"Starting Auto-Engineering on {self.original_shape[0]} rows, {self.original_shape[1]} columns.")
         
         # --- PHASE 1: CLEANING (AI-Guided) ---
         # We try to use the AI to decide how to clean. If it fails, we use heuristics.
@@ -37,7 +37,7 @@ class AutoDataEngineer:
                 self._apply_ai_cleaning_strategy()
                 ai_success = True
             except Exception as e:
-                self.log_step(f"⚠️ AI Strategy failed ({str(e)}). Switching to Heuristic Mode.")
+                self.log_step(f"AI Strategy failed ({str(e)}). Switching to Heuristic Mode.")
         
         if not ai_success:
             self._heuristic_cleaning()
@@ -54,7 +54,7 @@ class AutoDataEngineer:
         self._scale_numerical_features()
         
         final_shape = self.df.shape
-        self.log_step(f"✅ Pipeline Complete. Final Shape: {final_shape}")
+        self.log_step(f"Pipeline Complete. Final Shape: {final_shape}")
         
         return self.df, self.log
 
@@ -88,22 +88,22 @@ class AutoDataEngineer:
             if action == "drop":
                 self.df.drop(columns=[col], inplace=True)
                 reason = instructions.get("reason", "AI suggestion")
-                self.log_step(f"🗑️ Dropped '{col}' (AI Reason: {reason})")
+                self.log_step(f"Dropped '{col}' (AI Reason: {reason})")
                 
             elif action == "impute":
                 method = instructions.get("method", "median")
                 if method == "median" and pd.api.types.is_numeric_dtype(self.df[col]):
                     val = self.df[col].median()
                     self.df[col].fillna(val, inplace=True)
-                    self.log_step(f"🧩 Imputed '{col}' with Median ({val:.2f})")
+                    self.log_step(f"Imputed '{col}' with Median ({val:.2f})")
                 elif method == "mode":
                     val = self.df[col].mode()[0]
                     self.df[col].fillna(val, inplace=True)
-                    self.log_step(f"🧩 Imputed '{col}' with Mode ({val})")
+                    self.log_step(f"Imputed '{col}' with Mode ({val})")
                 else:
                     # Fallback for "value" or unknown method
                     self.df[col].fillna("Unknown", inplace=True)
-                    self.log_step(f"🧩 Imputed '{col}' with 'Unknown'")
+                    self.log_step(f"Imputed '{col}' with 'Unknown'")
 
     def _heuristic_cleaning(self):
         """Fallback: Standard logic if AI is unavailable."""
@@ -112,21 +112,21 @@ class AutoDataEngineer:
         if len(num_cols) > 0:
             imputer = SimpleImputer(strategy='median')
             self.df[num_cols] = imputer.fit_transform(self.df[num_cols])
-            self.log_step(f"🧩 (Heuristic) Imputed missing values in {len(num_cols)} numeric columns using Median.")
+            self.log_step(f"(Heuristic) Imputed missing values in {len(num_cols)} numeric columns using Median.")
 
         # Categorical: Impute with "Unknown"
         cat_cols = self.df.select_dtypes(include=['object', 'category']).columns
         for col in cat_cols:
             if self.df[col].isnull().sum() > 0:
                 self.df[col] = self.df[col].fillna("Unknown")
-                self.log_step(f"🧩 (Heuristic) Filled missing values in '{col}' with 'Unknown'.")
+                self.log_step(f"(Heuristic) Filled missing values in '{col}' with 'Unknown'.")
 
     def _drop_duplicates(self):
         initial = len(self.df)
         self.df = self.df.drop_duplicates()
         dropped = initial - len(self.df)
         if dropped > 0:
-            self.log_step(f"🗑️ Dropped {dropped} duplicate rows.")
+            self.log_step(f"Dropped {dropped} duplicate rows.")
 
     def _fix_data_types(self):
         # Convert ID-like columns to strings
@@ -135,7 +135,7 @@ class AutoDataEngineer:
                 # Only if high cardinality (lots of unique values), otherwise it might be a real count
                 if self.df[col].nunique() > 10: 
                     self.df[col] = self.df[col].astype(str)
-                    self.log_step(f"🔢 Converted ID column '{col}' to string.")
+                    self.log_step(f"Converted ID column '{col}' to string.")
 
     # --- PHASE 2: FEATURE ENGINEERING ---
 
@@ -152,7 +152,7 @@ class AutoDataEngineer:
                     
                     # Drop original date (ML models can't read raw dates)
                     self.df = self.df.drop(columns=[col])
-                    self.log_step(f"📅 Extracted Year, Month, Day from '{col}' and dropped original.")
+                    self.log_step(f"Extracted Year, Month, Day from '{col}' and dropped original.")
                 except:
                     pass
 
@@ -163,7 +163,7 @@ class AutoDataEngineer:
             # Only if it's not a tiny category (e.g. "Male/Female")
             if self.df[col].nunique() > 10:
                 self.df[f'{col}_len'] = self.df[col].astype(str).str.len()
-                self.log_step(f"📏 Created text length feature for '{col}'.")
+                self.log_step(f"Created text length feature for '{col}'.")
 
     def _encode_categoricals(self):
         cat_cols = self.df.select_dtypes(include=['object']).columns
@@ -176,12 +176,12 @@ class AutoDataEngineer:
                 new_col = f"{col}_encoded"
                 self.df[new_col] = le.fit_transform(self.df[col].astype(str))
                 self.df.drop(columns=[col], inplace=True)
-                self.log_step(f"🔤 Label Encoded '{col}' -> '{new_col}'")
+                self.log_step(f"Label Encoded '{col}' -> '{new_col}'")
             else:
                 # If high cardinality (> 50), it's likely a Name/ID -> Drop for ML
                 # (Unless we already extracted features from it)
                 if f'{col}_len' not in self.df.columns:
-                     self.log_step(f"⚠️ High cardinality in '{col}' ({unique_count}). Kept raw (might need embedding).")
+                     self.log_step(f"High cardinality in '{col}' ({unique_count}). Kept raw (might need embedding).")
 
     # --- PHASE 3: PREPROCESSING ---
 
@@ -191,7 +191,7 @@ class AutoDataEngineer:
         if len(num_cols) > 0:
             scaler = StandardScaler()
             self.df[num_cols] = scaler.fit_transform(self.df[num_cols])
-            self.log_step(f"⚖️ Scaled {len(num_cols)} numerical features using StandardScaler.")
+            self.log_step(f"Scaled {len(num_cols)} numerical features using StandardScaler.")
 
 # --- EXPORT FUNCTION ---
 def run_auto_prep(df: pd.DataFrame):
