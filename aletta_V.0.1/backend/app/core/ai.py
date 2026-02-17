@@ -39,11 +39,15 @@ def get_engineering_strategy(column_stats: str):
     Analyze the column statistics provided.
     Decide on the best cleaning strategy for each column.
     
+    RULES:
+    1. If a column is NUMERIC (int/float), use "impute" with "mean", "median", or "mode". NEVER use "Unknown" or strings for numbers.
+    2. If a column is TEXT (object), you can use "impute" with "value" (e.g., "Unknown").
+    3. If a column has too many missing values (>50%), use "drop".
+    
     OUTPUT FORMAT (Strict JSON):
     {
-        "Age": {"action": "impute", "method": "median"},
-        "City": {"action": "encode", "method": "label"},
-        "Notes": {"action": "drop", "reason": "too much missing text"}
+        "ColumnName": {"action": "impute", "method": "median"},
+        "City": {"action": "encode", "method": "label"}
     }
     """
     

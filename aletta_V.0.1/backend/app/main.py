@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.responses import FileResponse
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from app.core.database import engine, Base, get_db
@@ -232,3 +233,40 @@ async def analyze_project(
         "tool_results": action_report,
         "ai_insight": ai_response
     }
+
+@app.get("/projects/{project_id}/download/{file_type}")
+async def download_dataset(
+    project_id: int,
+    file_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # 1. SECURITY: Verify Ownership
+    project = db.query(models.Project).filter(
+        models.Project.id == project_id,
+        models.Project.owner_id == current_user.id
+    ).first()
+
+    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
+
+    if not project or not dataset:
+        raise HTTPException(status_code=404, detail="Project or File not found.")
+    
+    # 2. DETERMINE FILE PATH
+    file_path = dataset.file_path
+    filename = dataset.filename
+
+    if file_type == "engineered":
+        file_path = dataset.file_path.replace(".csv", "_engineered.csv")
+        filename = dataset.filename.replace(".csv", "_engineered.csv")
+
+        # Check if the AI has actually run yet
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=400, detail="Engineered data not found. Please run Analysis mode first")
+        
+    # 3. SERVE FILE
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type='text/csv'
+    )
