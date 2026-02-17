@@ -11,7 +11,7 @@ from app.core.security import SECRET_KEY, ALGORITHM
 from app.models.project import User
 from app.api import auth
 from app import schemas
-from app.services import eda_tools  # <--- NEW: Import the Auto-Pilot Engine
+from app.services import eda_tools, ml_tools  # <--- NEW: Import the Auto-Pilot Engine
 import shutil
 import os
 import pandas as pd
@@ -194,9 +194,43 @@ async def analyze_project(
         """
         
     elif mode == "model":
-        # Placeholder for Phase 2
-        action_report = {"status": "Pending Model Engine"}
-        system_instruction = "You are an ML Engineer. Explain that we are ready to build models."
+        #1. LOCATE ENGINEERED DATA
+        # We MUST use the file created by "Analysis Mode" (it has numbers, not strings)
+        engineered_path = dataset.file_path.replace(".csv", "_engineered.csv")
+
+        if not os.path.exists(engineered_path):
+            raise HTTPException(status_code=400, detail="Please run 'Analysis' mode first to clean and encode the data.")
+        
+        # Load data
+        df_clean = pd.read_csv(engineered_path)
+
+        # 2. RUN MODELING ENGINE
+        if not project.target_variable:
+            raise HTTPException(status_code=400, detail="Target Variable is missing. Please update project settings.")
+        
+        try:
+            modeling_report = ml_tools.run_auto_modeling(
+                df_clean,
+                project.target_variable,
+                project.id
+            )
+            action_report = modeling_report
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Modeling Failed: {str(e)}")
+        
+        # 3. AI EXPLANATION
+        system_instruction = f"""
+        You are an Expert Machine Learning Engineer.
+        You have just trained a model to predict: '{project.target_variable}'.
+        
+        MODELING REPORT:
+        {json.dumps(modeling_report, indent=2)}
+        
+        TASK:
+        1. Identify the 'Best Model' and its score.
+        2. Explain the 'Top Features' (Which columns are most important?).
+        3. Explain what this means for the user (e.g., "This means we can predict species with 95% accuracy").
+        """
         
     elif mode == "dashboard":
         # Placeholder for Phase 3
