@@ -45,7 +45,7 @@ class AutoDataEngineer:
         self._heuristic_cleaning(silent=True)
 
         # --- PHASE 4: PREPROCESSING ---
-        self._scale_numerical_features()
+        #self._scale_numerical_features()
         
         final_shape = self.df.shape
         self.log_step(f"✅ Pipeline Complete. Final Shape: {final_shape}")

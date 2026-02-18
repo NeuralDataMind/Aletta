@@ -3,9 +3,10 @@ import numpy as np
 import joblib
 import os
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score, f1_score, mean_squared_error, r2_score
 
 class AutoModeler:
@@ -52,14 +53,26 @@ class AutoModeler:
         
         if is_classification:
             models = {
-                "Logistic Regression": LogisticRegression(max_iter=1000),
-                "Random Forest": RandomForestClassifier(n_estimators=100)
+                "Logistic Regression": Pipeline([
+                    ('scaler', StandardScaler()),
+                    ('clf', LogisticRegression(max_iter=1000))
+                ]),
+                "Random Forest": Pipeline([
+                    ('scaler', StandardScaler()),
+                    ('clf', RandomForestClassifier(n_estimators=100))
+                ])
             }
             metric_name = "Accuracy"
         else:
             models = {
-                "Linear Regression": LinearRegression(),
-                "Random Forest": RandomForestRegressor(n_estimators=100)
+                "Linear Regression": Pipeline([
+                    ('scaler', StandardScaler()),
+                    ('reg', LinearRegression())
+                ]),
+                "Random Forest": Pipeline([
+                    ('scaler', StandardScaler()),
+                    ('reg', RandomForestRegressor(n_estimators=100))
+                ])
             }
             metric_name = "R2 Score"
 
