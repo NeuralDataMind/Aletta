@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Currently using SQLite for initial setup
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/aletta")
+# Currently using PGSQL for initial setup
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:Admin@localhost:5432/aletta")
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
