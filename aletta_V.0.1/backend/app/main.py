@@ -1,31 +1,35 @@
-from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Body
+from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Body, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import FileResponse
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
-from app.core.database import engine, Base, get_db
-from app.models import project as models
-from app.core.ai import get_groq_analysis
-from app.core.security import SECRET_KEY, ALGORITHM
-from app.models.project import User
-from app.api import auth
-from app import schemas
-from app.services import eda_tools, ml_tools  # <--- NEW: Import the Auto-Pilot Engine
+from datetime import datetime, timedelta
 import shutil
 import os
 import pandas as pd
 import json
 import numpy as np
 
-# Create Tables
+# Internal Imports
+from app.core.database import engine, Base, get_db
+from app.models import project as models
+from app.core.ai import get_groq_analysis
+from app.core.security import SECRET_KEY, ALGORITHM, pwd_context
+from app.models.project import User
+from app import schemas
+from app.services import eda_tools, ml_tools 
+
+# Initialize Database Tables
 models.Base.metadata.create_all(bind=engine)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+
+# OAuth2 Scheme - Fixed URL to match React frontend requests
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 app = FastAPI(title="Aletta Data Science Hub", version="0.2.0")
-app.include_router(auth.router)
 
-# CORS (Allow Frontend Access)
+# --- CORS CONFIGURATION ---
+# Necessary for your Vite/React frontend (5173) to communicate with FastAPI (8000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"], 
@@ -34,7 +38,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- DEPENDENCIES ---
+# --- AUTHENTICATION UTILITIES ---
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=30)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=401,
@@ -44,17 +55,38 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+        if username is None: raise credentials_exception
+    except JWTError: raise credentials_exception
         
-    user = db.query(User).filter(User.username == username).first()
-    if user is None:
-        raise credentials_exception
+    user = db.query(User).filter(User.email == username).first()
+    if user is None: raise credentials_exception
     return user
 
-# --- ROUTES ---
+# --- AUTHENTICATION ROUTES (Prefix matches React api.js) ---
+
+@app.post("/api/auth/register")
+async def register(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == user_in.email).first()
+    if user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    hashed_pwd = pwd_context.hash(user_in.password)
+    # Using email as username to match standard auth flow
+    new_user = User(email=user_in.email, hashed_password=hashed_pwd, username=user_in.email)
+    db.add(new_user)
+    db.commit()
+    return {"message": "User created successfully"}
+
+@app.post("/api/auth/login")
+async def login(user_in: schemas.UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == user_in.email).first()
+    if not user or not pwd_context.verify(user_in.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    token = create_access_token(data={"sub": user.email})
+    return {"access_token": token, "token_type": "bearer"}
+
+# --- PROJECT MANAGEMENT ROUTES ---
 
 @app.get("/")
 async def root():
@@ -82,9 +114,13 @@ def create_project(
     return db_project
 
 @app.get("/projects/", response_model=list[schemas.ProjectResponse])
-def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    projects = db.query(models.Project).filter(models.Project.owner_id == current_user.id).offset(skip).limit(limit).all()
-    return projects
+def read_projects(
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
+    return db.query(models.Project).filter(models.Project.owner_id == current_user.id).offset(skip).limit(limit).all()
 
 @app.post("/projects/{project_id}/upload/")
 async def upload_dataset(project_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -92,15 +128,15 @@ async def upload_dataset(project_id: int, file: UploadFile = File(...), db: Sess
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
+    os.makedirs("data", exist_ok=True)
     file_location = f"data/{file.filename}"
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        df = pd.read_csv(file_location, nrows=0)
+        df = pd.read_csv(file_location)
         columns = df.columns.tolist()
-        with open(file_location) as f:
-            row_count = sum(1 for line in f) - 1
+        row_count = len(df)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid CSV: {str(e)}")
     
@@ -127,7 +163,6 @@ async def get_project_eda(project_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not read file: {str(e)}")
     
-    # Safe summary for JSON
     summary = {
         "total_rows": len(df),
         "columns": list(df.columns),
@@ -139,15 +174,15 @@ async def get_project_eda(project_id: int, db: Session = Depends(get_db)):
 
     return {"summary": summary, "sample": sample_data}
 
-# --- 🧠 THE CORE INTELLIGENCE ENDPOINT ---
+# --- 🧠 CORE INTELLIGENCE ENGINE ---
+
 @app.post("/projects/{project_id}/analyze")
 async def analyze_project(
     project_id: int,
-    mode: str = Body(..., embed=True), # Expecting: "analysis", "model", or "dashboard"
+    mode: str = Body(..., embed=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 1. Verification
     project = db.query(models.Project).filter(
         models.Project.id == project_id, 
         models.Project.owner_id == current_user.id
@@ -158,21 +193,12 @@ async def analyze_project(
     if not project or not dataset:
         raise HTTPException(status_code=404, detail="Project or Data not found.")
     
-    # Load Data
     df = pd.read_csv(dataset.file_path)
-    
     action_report = {}
     system_instruction = ""
     
-    # 2. MODE EXECUTION
-    
     if mode == "analysis":
-        # --- AUTO-PILOT ENGAGED ---
-        # 1. Run the Smart Pipeline (Cleaning + Engineering + Scaling)
         processed_df, engineering_log = eda_tools.run_auto_prep(df)
-        
-        # 2. Save the result so ML can use it later
-        output_filename = dataset.filename.replace(".csv", "_engineered.csv")
         output_path = dataset.file_path.replace(".csv", "_engineered.csv")
         processed_df.to_csv(output_path, index=False)
         
@@ -180,172 +206,71 @@ async def analyze_project(
             "status": "Success",
             "original_shape": [dataset.row_count, len(dataset.columns)],
             "final_shape": processed_df.shape,
-            "new_file": output_filename,
             "pipeline_log": engineering_log
         }
-        
-        system_instruction = """
-        You are Aletta, an Autonomous Data Engineer.
-        You have successfully executed a Python pipeline to clean and feature engineer the user's dataset.
-        
-        Review the 'pipeline_log' below. 
-        Summarize the actions taken (e.g., "I imputed missing values..." or "I extracted date features...").
-        Explain WHY these steps prepare the data for the user's specific 'Problem Statement'.
-        """
+        system_instruction = "Summarize the cleaning and engineering steps based on the log."
         
     elif mode == "model":
-        #1. LOCATE ENGINEERED DATA
-        # We MUST use the file created by "Analysis Mode" (it has numbers, not strings)
         engineered_path = dataset.file_path.replace(".csv", "_engineered.csv")
-
         if not os.path.exists(engineered_path):
-            raise HTTPException(status_code=400, detail="Please run 'Analysis' mode first to clean and encode the data.")
+            raise HTTPException(status_code=400, detail="Run 'Analysis' mode first.")
         
-        # Load data
         df_clean = pd.read_csv(engineered_path)
-
-        # 2. RUN MODELING ENGINE
-        if not project.target_variable:
-            raise HTTPException(status_code=400, detail="Target Variable is missing. Please update project settings.")
+        modeling_report = ml_tools.run_auto_modeling(df_clean, project.target_variable, project.id)
+        action_report = modeling_report
+        system_instruction = "Explain the model accuracy and feature importance."
         
-        try:
-            modeling_report = ml_tools.run_auto_modeling(
-                df_clean,
-                project.target_variable,
-                project.id
-            )
-            action_report = modeling_report
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Modeling Failed: {str(e)}")
-        
-        # 3. AI EXPLANATION
-        system_instruction = f"""
-        You are an Expert Machine Learning Engineer.
-        You have just trained a model to predict: '{project.target_variable}'.
-        
-        MODELING REPORT:
-        {json.dumps(modeling_report, indent=2)}
-        
-        TASK:
-        1. Identify the 'Best Model' and its score.
-        2. Explain the 'Top Features' (Which columns are most important?).
-        3. Explain what this means for the user (e.g., "This means we can predict species with 95% accuracy").
-        """
-        
-    elif mode == "dashboard":
-        # Placeholder for Phase 3
-        action_report = {"status": "Pending Dashboard Engine"}
-        system_instruction = "You are a BI Specialist. Suggest key charts."
-    
     else:
-        raise HTTPException(status_code=400, detail="Invalid Mode. Use 'analysis', 'model', or 'dashboard'.")
+        raise HTTPException(status_code=400, detail="Invalid Mode.")
 
-    # 3. AI EXPLANATION
-    system_prompt = f"""
-    {system_instruction}
+    system_prompt = f"{system_instruction}\n\nProblem: {project.problem_statement}\nLog: {json.dumps(action_report)}"
+    ai_response = get_groq_analysis(system_prompt, df.describe().to_string())
     
-    PROJECT METADATA:
-    Problem: {project.problem_statement}
-    Context: {project.dataset_context}
-    
-    TOOL EXECUTION LOG (Ground Truth):
-    {json.dumps(action_report, indent=2)}
-    
-    Report to the user in a professional, "Done-for-you" tone.
-    """
-    
-    # We send a small sample of the *processed* data if available, else raw
-    if mode == "analysis":
-        data_context = processed_df.describe().to_string()
-    else:
-        data_context = df.describe().to_string()
-    
-    ai_response = get_groq_analysis(system_prompt, data_context)
-    
-    return {
-        "mode": mode,
-        "tool_results": action_report,
-        "ai_insight": ai_response
-    }
+    return {"mode": mode, "tool_results": action_report, "ai_insight": ai_response}
+
+# --- FILE OPERATIONS ---
 
 @app.get("/projects/{project_id}/download/{file_type}")
 async def download_dataset(
     project_id: int,
-    file_type: str, # Options: "raw", "engineered", "model" <--- NEW OPTION
+    file_type: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 1. SECURITY: Verify Ownership
     project = db.query(models.Project).filter(
         models.Project.id == project_id,
         models.Project.owner_id == current_user.id
     ).first()
-    
     dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
     
     if not project or not dataset:
-        raise HTTPException(status_code=404, detail="Project not found.")
+        raise HTTPException(status_code=404, detail="Not found.")
 
-    # 2. DETERMINE FILE PATH
     file_path = dataset.file_path
-    filename = dataset.filename
-
     if file_type == "engineered":
         file_path = dataset.file_path.replace(".csv", "_engineered.csv")
-        filename = dataset.filename.replace(".csv", "_engineered.csv")
-    
-    elif file_type == "model":  # <--- NEW LOGIC
-        # The ML Tool saves models as "data/models/project_{id}.pkl"
+    elif file_type == "model":
         file_path = f"data/models/project_{project_id}.pkl"
-        filename = f"model_project_{project_id}.pkl"
         
-        if not os.path.exists(file_path):
-             raise HTTPException(status_code=400, detail="Model not found. Please run 'Model' mode first.")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File missing.")
 
-    # 3. SERVE FILE
-    return FileResponse(
-        path=file_path, 
-        filename=filename, 
-        media_type='application/octet-stream' # Standard for binary files like .pkl
-    )
+    return FileResponse(path=file_path, filename=os.path.basename(file_path), media_type='application/octet-stream')
 
 @app.delete("/projects/{project_id}", status_code=204)
-def delete_project(
-    project_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    # Verify the project exist or not
-    project = db.query(models.Project).filter(
-        models.Project.id == project_id,
-        models.Project.owner_id == current_user.id
-    ).first()
-
+def delete_project(project_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    project = db.query(models.Project).filter(models.Project.id == project_id, models.Project.owner_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found or unauthorized.")
+        raise HTTPException(status_code=404, detail="Unauthorized.")
     
-    # Find the associated dataset
     dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
-
-    # Nuke the physical File 
     if dataset:
-        try:
-            raw_path = dataset.file_path
-            engineered_path = raw_path.replace(".csv", "_engineered.csv")
-            model_path = f"data/models/project_{project_id}.pkl"
+        for suffix in ["", "_engineered.csv"]:
+            path = dataset.file_path.replace(".csv", suffix)
+            if os.path.exists(path): os.remove(path)
+        model_path = f"data/models/project_{project_id}.pkl"
+        if os.path.exists(model_path): os.remove(model_path)
 
-            files_to_delete = [raw_path, engineered_path, model_path]
-
-            for file_path in files_to_delete:
-                if file_path and os.path.exists(file_path):
-                    os.remove(file_path)
-                    print(f"Deleted physical file: {file_path}")
-        except Exception as e:
-            print(f"Warning: Could not delete some physcial files: {e}")
-
-    # Nuke the Project Record
     db.delete(project)
     db.commit()
-
-    # 204 No Content means success, but nothing to return 
     return None
