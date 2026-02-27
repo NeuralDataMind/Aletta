@@ -70,7 +70,7 @@ class AutoModeler:
                 ]),
                 "Random Forest": Pipeline([
                     ('scaler', StandardScaler()), 
-                    ('reg', RandomForestClassifier(n_estimators=100))
+                    ('reg', RandomForestRegressor(n_estimators=100))
                 ])
             }
             metric_name = "R2 Score"
