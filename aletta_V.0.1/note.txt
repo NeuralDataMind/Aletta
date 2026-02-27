@@ -17,3 +17,12 @@
 | | |-.env
 | | |-requirements.txt
 | |-frontend
+| | |-node_modules
+| | |-public
+| | |-src 
+| | | |-assets
+| | | | |-App.css
+| | | | |-App.jsx
+| | | | |-index.css
+| | | | |-main.jsx
+| | | -index.html
