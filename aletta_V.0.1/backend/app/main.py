@@ -308,3 +308,44 @@ async def download_dataset(
         filename=filename, 
         media_type='application/octet-stream' # Standard for binary files like .pkl
     )
+
+@app.delete("/projects/{project_id}", status_code=204)
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    # Verify the project exist or not
+    project = db.query(models.Project).filter(
+        models.Project.id == project_id,
+        models.Project.owner_id == current_user.id
+    ).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found or unauthorized.")
+    
+    # Find the associated dataset
+    dataset = db.query(models.Dataset).filter(models.Dataset.project_id == project_id).first()
+
+    # Nuke the physical File 
+    if dataset:
+        try:
+            raw_path = dataset.file_path
+            engineered_path = raw_path.replace(".csv", "_engineered.csv")
+            model_path = f"data/models/project_{project_id}.pkl"
+
+            files_to_delete = [raw_path, engineered_path, model_path]
+
+            for file_path in files_to_delete:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                    print(f"Deleted physical file: {file_path}")
+        except Exception as e:
+            print(f"Warning: Could not delete some physcial files: {e}")
+
+    # Nuke the Project Record
+    db.delete(project)
+    db.commit()
+
+    # 204 No Content means success, but nothing to return 
+    return None
