@@ -1,6 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Auth from './pages/Auth'; // Adjust path if your Auth is located elsewhere
 import Dashboard from './pages/dashboard'; // The actual Dashboard file I gave you
+import NewProject from './pages/NewProject';
+import ProjectDetail from './pages/ProjectDetail';    
 
 // --- The Guard Checkpoint ---
 const ProtectedRoute = ({ children }) => {
@@ -31,6 +33,26 @@ function App() {
                 <Dashboard />
               </ProtectedRoute>
             } 
+          />
+
+          {/* NewProject Route */}
+          <Route
+            path="/projects/new"
+            element={
+              <ProtectedRoute>
+                <NewProject />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Project Details */}
+          <Route
+            path="/projects/:id"
+            element={
+              <ProtectedRoute>
+                <ProjectDetail />
+              </ProtectedRoute>
+            }
           />
 
           {/* Catch-all: If they type a random URL, send them to login */}

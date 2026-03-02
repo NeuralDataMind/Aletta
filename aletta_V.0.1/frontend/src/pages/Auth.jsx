@@ -1,167 +1,179 @@
 import { useState } from 'react';
-import { authAPI } from '../api';
 import { useNavigate } from 'react-router-dom';
+import api from '../api';
 
 const Auth = () => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [formData, setFormData] = useState({ email: '', password: '', username: '' });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const [isLogin, setIsLogin] = useState(false);
-  const [formData, setFormData] = useState({ email: '', password: '' });
 
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+    setError('');
+    setLoading(true);
+
     try {
-      if (isLogin) {
-        // Attempt Login
-        const response = await authAPI.login({
+      // Step 1: If signing up, create the account first
+      if (!isLogin) {
+        await api.post('/api/auth/register', {
           email: formData.email,
-          password: formData.password
+          password: formData.password,
+          username: formData.username
         });
-        
-        console.log("Login successful!", response.data);
-        
-        // Save the token to local storage
-        if (response.data.access_token) {
-          localStorage.setItem('token', response.data.access_token);
-        }
-        
-        // Push the user to the dashboard
-        navigate('/dashboard');
-        
-      } else {
-        // Attempt Registration
-        const response = await authAPI.register({
-          name: formData.name, // Ensure your FastAPI schema expects 'name' if you kept it in the form
-          email: formData.email,
-          password: formData.password
-        });
-        
-        console.log("Registration successful!", response.data);
-        alert("Account created successfully! Please sign in.");
-        
-        // Switch the UI back to the login screen
-        setIsLogin(true);
       }
-    } catch (error) {
-      // Brutal error handling
-      console.error("Auth Failed:", error);
-      const errorMsg = error.response?.data?.detail || "An error occurred connecting to the server.";
-      alert(`Error: ${errorMsg}`);
+
+      // Step 2: Proceed directly to Login (runs for both returning users AND newly registered users)
+      const response = await api.post('/api/auth/login', {
+        email: formData.email,
+        password: formData.password
+      });
+      
+      // Save token and blast them to the dashboard
+      localStorage.setItem('token', response.data.access_token);
+      navigate('/dashboard');
+      
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.detail || "Authentication failed. Check your credentials.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="h-screen flex font-sans bg-white overflow-hidden relative">
+    <div className="min-h-screen flex font-sans text-[#1D1D1F]">
       
-      {/* SVG Displacement Map */}
-      <svg className="w-0 h-0 absolute pointer-events-none hidden">
-        <filter id="liquid-refraction" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.004" numOctaves="2" result="noise" />
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="30" xChannelSelector="R" yChannelSelector="G" result="displaced" />
-          <feGaussianBlur in="displaced" stdDeviation="25" result="blurred" />
-          <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1.8 0" in="blurred" />
-        </filter>
-      </svg>
-
-      {/* Left Side */}
-      <div className="hidden lg:block lg:w-1/2 relative h-full">
-        <img
-          src="https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop"
-          alt="Data Science Network"
-          className="absolute inset-0 w-full h-full object-cover"
-        />
+      {/* --- LEFT SIDE: Branding & Color --- */}
+      <div className="hidden lg:flex lg:w-1/2 bg-linear-to-br from-indigo-900 via-blue-900 to-black text-white p-12 flex-col justify-between relative overflow-hidden">
+        <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-[100px] opacity-40"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-[100px] opacity-40"></div>
         
-        {/* The Glass Card - TEXT COLOR UPDATED TO GRAY-900 */}
-        <div 
-          className="absolute bottom-12 left-12 right-12 p-8 rounded-4xl bg-white/30 border border-white/50 shadow-[inset_0_2px_4px_rgba(255,255,255,0.9),0_12px_40px_rgba(0,0,0,0.4)] transition-all duration-500"
-          style={{ backdropFilter: 'url(#liquid-refraction) saturate(180%)' }}
-        >
-          <p className="text-xl font-bold leading-relaxed mb-6 text-gray-900">
-            "Aletta makes it easy to analyze vast datasets and build machine learning pipelines. Whether I'm running EDA or predicting outcomes, the speed and clarity are unmatched."
-          </p>
-          <div className="flex justify-between items-end">
-            <div>
-              <p className="font-extrabold text-lg text-black">Mallikarjun Reddy Bardipuram</p>
-              <p className="text-sm font-bold text-gray-800">Data Science Student</p>
-              <p className="text-xs font-bold text-gray-700 uppercase tracking-wider mt-1">ACE Engineering College</p>
-            </div>
-            <div className="flex space-x-3">
-              <button className="cursor-pointer p-2 hover:bg-white/50 bg-white/30 rounded-full transition text-black border border-gray-400 shadow-sm">&larr;</button>
-              <button className="cursor-pointer p-2 hover:bg-white/50 bg-white/30 rounded-full transition text-black border border-gray-400 shadow-sm">&rarr;</button>
-            </div>
+        <div className="relative z-10">
+          <div className="h-12 w-12 bg-white text-black rounded-xl flex items-center justify-center mb-6 shadow-sm">
+            <span className="font-extrabold text-lg leading-none tracking-tighter">ADS</span>
           </div>
+          <h1 className="text-4xl font-bold tracking-tight mb-4">Aletta Data Engine.</h1>
+          <p className="text-lg text-indigo-200 font-medium max-w-md">
+            The autonomous workspace for modern data scientists. Upload datasets, engineer features, and train models in seconds.
+          </p>
+        </div>
+
+        <div className="relative z-10">
+          <p className="text-sm font-medium text-indigo-300">© 2026 Aletta Systems. All rights reserved.</p>
         </div>
       </div>
 
-      {/* Right Side */}
-      <div className="w-full lg:w-1/2 h-full flex flex-col justify-center items-center px-8 sm:px-16 md:px-24 bg-[#FAFAFA]">
-        <div className="max-w-md w-full">
+      {/* --- RIGHT SIDE: The Form --- */}
+      <div className="w-full lg:w-1/2 flex flex-col items-center justify-center bg-[#F5F5F7] p-8 sm:p-12">
+        <div className="w-full max-w-md">
           
-          <div className="flex justify-center space-x-8 mb-8">
-            <button onClick={() => setIsLogin(true)} className={`cursor-pointer flex items-center space-x-2 pb-2 transition-all ${isLogin ? 'text-gray-900 font-bold border-b-2 border-gray-900' : 'text-gray-400 hover:text-gray-900'}`}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
-              <span>Login</span>
-            </button>
-            <button onClick={() => setIsLogin(false)} className={`cursor-pointer flex items-center space-x-2 pb-2 transition-all ${!isLogin ? 'text-gray-900 font-bold border-b-2 border-gray-900' : 'text-gray-400 hover:text-gray-900'}`}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
-              <span>Sign Up</span>
-            </button>
-          </div>
+          <h2 className="text-3xl font-bold mb-2">
+            {isLogin ? 'Sign in to Aletta' : 'Create your account'}
+          </h2>
+          <p className="text-sm text-gray-500 mb-8 font-medium">
+            {isLogin ? 'Welcome back. Enter your details below.' : 'Start analyzing data today.'}
+          </p>
 
-          <div className="text-center mb-6">
-            <h2 className="text-3xl font-bold text-gray-900 mb-1">{isLogin ? 'Welcome back' : 'Create an account'}</h2>
-            <p className="text-gray-500 text-sm">{isLogin ? 'Please enter your details to sign in.' : 'Please enter your details to create an account.'}</p>
-          </div>
-
-          {/* SVGs ADDED FOR UNIVERSAL RENDERING */}
-          <div className="space-y-3 mb-6">
-            <button type="button" className="cursor-pointer w-full flex items-center justify-center space-x-3 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition shadow-sm">
-              <svg className="w-5 h-5" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+          {/* Dummy SSO Buttons */}
+          <div className="space-y-3 mb-8">
+            <button 
+              type="button"
+              className="w-full flex items-center justify-center space-x-2 bg-white border border-[#E5E5EA] text-[#1D1D1F] font-semibold py-3 px-4 rounded-xl hover:bg-gray-50 transition-colors shadow-sm cursor-not-allowed opacity-70"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 15.02 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
               <span>Continue with Google</span>
             </button>
-            <button type="button" className="cursor-pointer w-full flex items-center justify-center space-x-3 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition shadow-sm">
-              <svg className="w-5 h-5" viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+            <button 
+              type="button"
+              className="w-full flex items-center justify-center space-x-2 bg-black text-white font-semibold py-3 px-4 rounded-xl hover:bg-gray-800 transition-colors shadow-sm cursor-not-allowed opacity-70"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.78 1.18-.19 2.24-.86 3.43-.88 1.52-.03 2.69.59 3.44 1.67-3.07 1.76-2.58 5.76.29 6.84-1.14 2.1-2.29 3.63-2.24 4.56zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"></path></svg>
               <span>Continue with Apple</span>
             </button>
           </div>
 
-          <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200"></div></div>
-            <div className="relative flex justify-center text-sm"><span className="px-4 bg-[#FAFAFA] text-gray-400 text-xs uppercase font-bold tracking-wider">OR</span></div>
+          <div className="flex items-center mb-8">
+            <div className="flex-1 border-t border-gray-300"></div>
+            <span className="px-3 text-xs text-gray-500 font-bold uppercase tracking-wide">Or continue with email</span>
+            <div className="flex-1 border-t border-gray-300"></div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
-              <input type="email" name="email" value={formData.email} onChange={handleChange} required placeholder="Enter your email address" className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-gray-900 focus:border-gray-900 sm:text-sm transition-all outline-none bg-white shadow-sm" />
+          {error && (
+            <div className="mb-6 p-3 bg-red-50 text-red-700 text-sm font-medium rounded-lg border border-red-100 text-center">
+              {error}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input type="password" name="password" value={formData.password} onChange={handleChange} required placeholder="Enter your password" className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-gray-900 focus:border-gray-900 sm:text-sm transition-all outline-none bg-white shadow-sm" />
-            </div>
+          )}
 
+          <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
-              <div className="flex items-start mt-2">
-                <input id="terms" type="checkbox" className="cursor-pointer mt-1 h-4 w-4 text-gray-900 border-gray-300 rounded focus:ring-gray-900" />
-                <label htmlFor="terms" className="cursor-pointer ml-3 text-xs text-gray-500 leading-relaxed">
-                  Please keep me updated by email with the latest news, research findings, and event updates.
-                </label>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Full Name</label>
+                <input 
+                  type="text" 
+                  name="username" 
+                  required={!isLogin}
+                  value={formData.username} 
+                  onChange={handleChange} 
+                  className="w-full px-4 py-3 bg-white border border-[#E5E5EA] focus:border-black rounded-xl outline-none transition-all text-sm font-medium shadow-sm"
+                  placeholder="Mallikarjun Reddy"
+                />
               </div>
             )}
 
-            <button type="submit" className="cursor-pointer w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-sm font-bold text-white bg-[#111111] hover:bg-black focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 mt-4 transition-colors">
-              {isLogin ? 'Sign in' : 'Create an account'}
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Email</label>
+              <input 
+                type="email" 
+                name="email" 
+                required
+                value={formData.email} 
+                onChange={handleChange} 
+                className="w-full px-4 py-3 bg-white border border-[#E5E5EA] focus:border-black rounded-xl outline-none transition-all text-sm font-medium shadow-sm"
+                placeholder="you@example.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Password</label>
+              <input 
+                type="password" 
+                name="password" 
+                required
+                value={formData.password} 
+                onChange={handleChange} 
+                className="w-full px-4 py-3 bg-white border border-[#E5E5EA] focus:border-black rounded-xl outline-none transition-all text-sm font-medium shadow-sm"
+                placeholder="••••••••"
+              />
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full mt-2 bg-black hover:bg-gray-800 text-white font-bold py-3.5 px-4 rounded-xl transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 shadow-sm"
+            >
+              {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Create Account')}
             </button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-gray-500">
-            {isLogin ? "Don't have an account? " : "Already have an account? "}
-            <button onClick={() => setIsLogin(!isLogin)} className="cursor-pointer font-bold text-gray-900 underline hover:text-black transition-colors">
+          <div className="mt-8 text-center text-sm">
+            <span className="text-gray-500 font-medium">
+              {isLogin ? "Don't have an account?" : "Already have an account?"}
+            </span>
+            <button 
+              type="button"
+              onClick={() => { setIsLogin(!isLogin); setError(''); }}
+              className="font-bold text-black hover:text-gray-600 hover:underline cursor-pointer transition-colors focus:outline-none ml-1.5"
+            >
               {isLogin ? 'Sign up' : 'Sign in'}
             </button>
           </div>
+          
         </div>
       </div>
     </div>

@@ -63,16 +63,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 # --- AUTHENTICATION ROUTES (Prefix matches React api.js) ---
-
 @app.post("/api/auth/register")
 async def register(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == user_in.email).first()
-    if user:
+    if db.query(User).filter(User.email == user_in.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     
     hashed_pwd = pwd_context.hash(user_in.password)
-    # Using email as username to match standard auth flow
-    new_user = User(email=user_in.email, hashed_password=hashed_pwd, username=user_in.email)
+    # Automatically fallback to email if username is left blank
+    actual_username = user_in.username if user_in.username else user_in.email
+    
+    new_user = User(email=user_in.email, hashed_password=hashed_pwd, username=actual_username)
     db.add(new_user)
     db.commit()
     return {"message": "User created successfully"}
@@ -85,6 +85,12 @@ async def login(user_in: schemas.UserLogin, db: Session = Depends(get_db)):
     
     token = create_access_token(data={"sub": user.email})
     return {"access_token": token, "token_type": "bearer"}
+
+# Get User profile details
+@app.get("/api/auth/me", response_model=schemas.UserResponse)
+async def get_user_profile(current_user: User = Depends(get_current_user)):
+    """Returns the profile of the currently authenticated user."""
+    return current_user
 
 # --- PROJECT MANAGEMENT ROUTES ---
 
@@ -202,11 +208,15 @@ async def analyze_project(
         output_path = dataset.file_path.replace(".csv", "_engineered.csv")
         processed_df.to_csv(output_path, index=False)
         
+        # Extract the first 4 rows and convert to a JSON-safe dictionary
+        sample_data = processed_df.head(4).fillna("").to_dict(orient="records")
+        
         action_report = {
             "status": "Success",
             "original_shape": [dataset.row_count, len(dataset.columns)],
             "final_shape": processed_df.shape,
-            "pipeline_log": engineering_log
+            "pipeline_log": engineering_log,
+            "engineered_sample": sample_data  # <-- This is what the React table requires
         }
         system_instruction = "Summarize the cleaning and engineering steps based on the log."
         
