@@ -204,7 +204,7 @@ async def analyze_project(
     system_instruction = ""
     
     if mode == "analysis":
-        processed_df, engineering_log = eda_tools.run_auto_prep(df)
+        processed_df, engineering_log = eda_tools.run_auto_prep(df, project.target_variable)
         output_path = dataset.file_path.replace(".csv", "_engineered.csv")
         processed_df.to_csv(output_path, index=False)
         
