@@ -21,8 +21,13 @@
 | | |-public
 | | |-src 
 | | | |-assets
-| | | | |-App.css
-| | | | |-App.jsx
-| | | | |-index.css
-| | | | |-main.jsx
+| | | |-pages
+| | | | |-Auth.jsx
+| | | | |-dashboard.jsx
+| | | | |-NewProject.jsx
+| | | | |-ProjectDetail.jsx
+| | | -api.js
+| | | -App.css
+| | | -App.jsx
 | | | -index.html
+| | | -main.jsx
